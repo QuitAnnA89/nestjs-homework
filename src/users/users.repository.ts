@@ -50,8 +50,9 @@ export class UsersRepository {
     skip: number,
     login?: string,
   ): Promise<[UserEntity[], number]> {
+    const escaped = login?.replace(/[\\%_]/g, '\\$&');
     return this.repo.findAndCount({
-      where: login ? { login: ILike(`%${login}%`) } : {},
+      where: login ? { login: ILike(`%${escaped}%`) } : {},
       take: take,
       skip: skip,
       order: { id: 'ASC' },

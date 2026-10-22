@@ -16,23 +16,18 @@ export class RefreshTokensRepository {
     params: CreateRefreshTokenParams,
   ): Promise<RefreshTokenEntity> {
     const token = this.repo.create(params);
-    return await this.repo.save(token);
+    return this.repo.save(token);
   }
   async findTokenById(id: string): Promise<RefreshTokenEntity | null> {
-    const token = this.repo.findOne({
-      where: {
-        id,
-      },
+    return this.repo.findOne({
+      where: { id },
     });
-    return token;
   }
   async deleteTokenById(id: string): Promise<DeleteResult> {
-    const token = this.repo.delete(id);
-    return token;
+    return this.repo.delete(id);
   }
 
   async deleteAllTokensByUserId(userId: number): Promise<DeleteResult> {
-    const result = this.repo.delete({ userId });
-    return result;
+    return this.repo.delete({ userId });
   }
 }

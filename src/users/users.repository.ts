@@ -13,30 +13,27 @@ export class UsersRepository {
   ) {}
 
   async findUserByLogin(login: string): Promise<UserEntity | null> {
-    const user = await this.repo.findOne({ where: { login } });
-    return user;
+    return this.repo.findOne({ where: { login } });
   }
 
   async findUserByEmail(email: string): Promise<UserEntity | null> {
-    const user = await this.repo.findOne({ where: { email } });
-    return user;
+    return this.repo.findOne({ where: { email } });
   }
 
   async findUserByLoginWithPassword(login: string): Promise<UserEntity | null> {
-    const user = await this.repo.findOne({
+    return this.repo.findOne({
       where: { login },
       select: { id: true, passwordHash: true },
     });
-    return user;
   }
 
   async createUser(dto: CreateUserDto): Promise<UserEntity> {
     const user = this.repo.create(dto);
-    return await this.repo.save(user);
+    return this.repo.save(user);
   }
 
   async findUserById(id: number): Promise<UserEntity | null> {
-    const user = await this.repo.findOne({
+    return this.repo.findOne({
       where: { id },
       select: {
         id: true,
@@ -46,7 +43,6 @@ export class UsersRepository {
         description: true,
       },
     });
-    return user;
   }
 
   async findAllUsers(
@@ -54,7 +50,7 @@ export class UsersRepository {
     skip: number,
     login?: string,
   ): Promise<[UserEntity[], number]> {
-    const [result, total] = await this.repo.findAndCount({
+    return this.repo.findAndCount({
       where: login ? { login: ILike(`%${login}%`) } : {},
       take: take,
       skip: skip,
@@ -67,15 +63,12 @@ export class UsersRepository {
         description: true,
       },
     });
-    return [result, total];
   }
   async softDeleteUser(id: number): Promise<UpdateResult> {
-    const result = await this.repo.softDelete(id);
-    return result;
+    return this.repo.softDelete(id);
   }
 
   async updateUser(id: number, dto: UpdateUserDto): Promise<UpdateResult> {
-    const result = await this.repo.update(id, dto);
-    return result;
+    return this.repo.update(id, dto);
   }
 }

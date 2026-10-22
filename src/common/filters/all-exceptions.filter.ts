@@ -23,44 +23,39 @@ export class AllExceptionsFilter implements ExceptionFilter {
         typeof res === 'string'
           ? res
           : (res as { message: string | string[] }).message;
-      const error = HttpStatus[status];
-      const body: ErrorResponse = {
-        statusCode: status,
-        error,
-        message,
-        path: request.url,
-        timestamp: new Date().toISOString(),
-      };
-      return response.status(status).json(body);
+      return response
+        .status(status)
+        .json(this.buildBody(status, message, request));
     }
     if (exception instanceof QueryFailedError) {
       const code = (exception.driverError as { code: string }).code;
       if (code === '23505') {
         const status = HttpStatus.CONFLICT;
         const message = 'Запись с такими данными уже существует';
-        const error = HttpStatus[status];
-        const body: ErrorResponse = {
-          statusCode: status,
-          error,
-          message,
-          path: request.url,
-          timestamp: new Date().toISOString(),
-        };
-        return response.status(status).json(body);
+        return response
+          .status(status)
+          .json(this.buildBody(status, message, request));
       }
     }
     this.logger.error(exception);
 
     const status = HttpStatus.INTERNAL_SERVER_ERROR;
-    const error = HttpStatus[status];
     const message = 'Внутренняя ошибка сервера';
-    const body: ErrorResponse = {
+    return response
+      .status(status)
+      .json(this.buildBody(status, message, request));
+  }
+  private buildBody(
+    status: number,
+    message: string | string[],
+    request: Request,
+  ): ErrorResponse {
+    return {
       statusCode: status,
-      error,
+      error: HttpStatus[status],
       message,
       path: request.url,
       timestamp: new Date().toISOString(),
     };
-    return response.status(status).json(body);
   }
 }

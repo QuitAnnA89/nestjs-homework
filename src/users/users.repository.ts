@@ -58,7 +58,6 @@ export class UsersRepository {
       select: {
         id: true,
         login: true,
-        email: true,
         age: true,
         description: true,
       },

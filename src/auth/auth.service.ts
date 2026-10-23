@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { type ConfigType } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { hash, verify } from 'argon2';
 import type { Response } from 'express';
 import { createHash } from 'node:crypto';
@@ -27,6 +28,14 @@ export class AuthService {
     private readonly refreshTokensRepository: RefreshTokensRepository,
   ) {}
   private readonly logger = new Logger(AuthService.name);
+
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async cleanupExpiredTokens() {
+    const result = await this.refreshTokensRepository.deleteExpiredTokens(
+      new Date(),
+    );
+    this.logger.log(`удалено истекших токенов ${result.affected}`);
+  }
 
   async signUp(res: Response, dto: SignUpDto) {
     const { login, email, password, age, description } = dto;

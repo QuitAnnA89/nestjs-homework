@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeleteResult, Repository } from 'typeorm';
+import { DeleteResult, LessThan, Repository } from 'typeorm';
 
 import { CreateRefreshTokenParams } from '../common/interfaces/refresh-token.interface.js';
 import { RefreshTokenEntity } from './entities/refresh-token.entity.js';
@@ -29,5 +29,9 @@ export class RefreshTokensRepository {
 
   async deleteAllTokensByUserId(userId: number): Promise<DeleteResult> {
     return this.repo.delete({ userId });
+  }
+
+  async deleteExpiredTokens(before: Date): Promise<DeleteResult> {
+    return this.repo.delete({ expiresAt: LessThan(before) });
   }
 }

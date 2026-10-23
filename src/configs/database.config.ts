@@ -2,6 +2,7 @@ import { type ConfigType, registerAs } from '@nestjs/config';
 import type { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { CreateUsers1791479233933 } from '../database/migrations/1791479233933-create-users.js';
 import { CreateRefreshTokens1791659020534 } from '../database/migrations/1791659020534-create-refresh-tokens.js';
+import { AddRefreshTokensUserIdIndex1792787822275 } from '../database/migrations/1792787822275-add-refresh-tokens-user-id-index.js';
 
 export async function getTypeOrmConfig(
   database: ConfigType<typeof databaseConfig>,
@@ -15,7 +16,11 @@ export async function getTypeOrmConfig(
     database: database.database,
     autoLoadEntities: true,
     synchronize: false,
-    migrations: [CreateUsers1791479233933, CreateRefreshTokens1791659020534],
+    migrations: [
+      CreateUsers1791479233933,
+      CreateRefreshTokens1791659020534,
+      AddRefreshTokensUserIdIndex1792787822275,
+    ],
     migrationsRun: true,
   };
 }

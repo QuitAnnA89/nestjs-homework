@@ -2,6 +2,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { type ConfigType } from '@nestjs/config';
@@ -25,14 +26,21 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly refreshTokensRepository: RefreshTokensRepository,
   ) {}
+  private readonly logger = new Logger(AuthService.name);
 
   async signUp(res: Response, dto: SignUpDto) {
     const { login, email, password, age, description } = dto;
 
     if (await this.usersService.findUserByEmail(email)) {
+      this.logger.warn(
+        `ошибка регистрации: пользователь с таким email уже существует`,
+      );
       throw new ConflictException('Пользователь с такой почтой уже существует');
     }
     if (await this.usersService.findUserByLogin(login)) {
+      this.logger.warn(
+        `ошибка регистрации: пользователь с таким логином:${login} уже существует`,
+      );
       throw new ConflictException(
         'Пользователь с таким логином уже существует',
       );
@@ -45,7 +53,9 @@ export class AuthService {
       age,
       description,
     });
-
+    this.logger.log(
+      `успех: пользователь зарегистрировался под userId=${user.id}`,
+    );
     return this.issueTokensWithCookie(res, user.id);
   }
 
@@ -55,38 +65,61 @@ export class AuthService {
     const user = await this.usersService.findUserByLoginWithPassword(login);
 
     if (!user) {
+      this.logger.warn(
+        `ошибка входа: неверный логин пользователя login=${login}`,
+      );
       throw new UnauthorizedException('Неверный логин или пароль');
     }
 
     const isValidPassword = await verify(user.passwordHash, password);
     if (!isValidPassword) {
+      this.logger.warn(
+        `ошибка входа: пароль пользователя userId=${user.id}, login=${login}`,
+      );
       throw new UnauthorizedException('Неверный логин или пароль');
     }
+    this.logger.log(
+      `успех: пользователь вошёл userId=${user.id}, login=${login}`,
+    );
     return this.issueTokensWithCookie(res, user.id);
   }
 
   async refresh(res: Response, refresh_token: string | undefined) {
+    let payload: RefreshPayload;
     if (!refresh_token) {
+      this.logger.warn(`ошибка обновления токена: нет рефреш токена`);
       throw new UnauthorizedException('Недействительный токен');
     }
-    let payload: RefreshPayload;
+
     try {
       payload = this.jwtService.verify<RefreshPayload>(refresh_token, {
         secret: this.jwt.refreshSecret,
       });
     } catch {
+      this.logger.warn(
+        `ошибка обновления токена: невалидный или просроченный токен`,
+      );
       throw new UnauthorizedException('Недействительный токен');
     }
     const { jti, id } = payload;
     const session = await this.refreshTokensRepository.findTokenById(jti);
     if (!session) {
+      this.logger.warn(
+        `ошибка обновления токена: недействительная сессия пользователя userId=${id}, jti=${jti}`,
+      );
       throw new UnauthorizedException('Недействительный токен');
     }
     const tokenHash = createHash('sha256').update(refresh_token).digest('hex');
     if (session.tokenHash !== tokenHash) {
+      this.logger.warn(
+        `ошибка обновления токена: недействительный хэш пользователя userId=${id}, jti=${jti}`,
+      );
       throw new UnauthorizedException('Недействительный токен');
     }
     await this.refreshTokensRepository.deleteTokenById(jti);
+    this.logger.log(
+      `успех: токен обновлен у пользователя userId=${id}, jti=${jti}`,
+    );
     return this.issueTokensWithCookie(res, id);
   }
 
@@ -118,6 +151,7 @@ export class AuthService {
   async logout(res: Response, refresh_token: string | undefined) {
     res.clearCookie('refreshToken', { path: '/auth' });
     if (!refresh_token) {
+      this.logger.warn(`ошибка выхода: у пользователя нет refresh-токена`);
       return;
     }
     let payload: RefreshPayload;
@@ -126,15 +160,19 @@ export class AuthService {
         secret: this.jwt.refreshSecret,
       });
     } catch {
+      this.logger.warn(`ошибка выхода: невалидный токен`);
       return;
     }
-    const { jti } = payload;
-
+    const { id, jti } = payload;
     await this.refreshTokensRepository.deleteTokenById(jti);
+    this.logger.log(
+      `успех: пользователь вышел из сессии userId=${id}, jti=${jti}`,
+    );
   }
 
   async revokeAllSessions(userId: number) {
     await this.refreshTokensRepository.deleteAllTokensByUserId(userId);
+    this.logger.log(`успех: сессии пользователя удалены userId=${userId}`);
   }
 
   private async issueTokens(userId: number) {

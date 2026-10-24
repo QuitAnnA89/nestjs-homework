@@ -1,90 +1,108 @@
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { Test } from '@nestjs/testing';
 import { hash, verify } from 'argon2';
+import type { Response } from 'express';
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { DataSource } from 'typeorm';
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { jwtConfig } from '../configs/jwt.config.js';
+import { UsersService } from '../users/users.service.js';
 import { AuthService } from './auth.service.js';
+import { RefreshTokensRepository } from './refresh-tokens.repository.js';
 
 vi.mock('argon2');
 describe('AuthService', () => {
+  const manager = {};
+  const jwt = {
+    accessSecret: 'a',
+    refreshSecret: 'r',
+    accessTtl: 900,
+    refreshTtl: 604800,
+  };
+
+  let service: AuthService;
+  let usersService: {
+    findUserByLoginWithPassword: Mock;
+    findUserByEmail: Mock;
+    findUserByLogin: Mock;
+    createUser: Mock;
+  };
+  let jwtService: { sign: Mock; verify: Mock };
+  let refreshTokensRepository: {
+    findTokenById: Mock;
+    deleteTokenById: Mock;
+    deleteAllTokensByUserId: Mock;
+    saveToken: Mock;
+  };
+  let dataSource: { transaction: Mock };
+  let res: { cookie: Mock; clearCookie: Mock };
+
+  beforeEach(async () => {
+    usersService = {
+      findUserByLoginWithPassword: vi.fn(),
+      findUserByEmail: vi.fn(),
+      findUserByLogin: vi.fn(),
+      createUser: vi.fn(),
+    };
+    jwtService = { sign: vi.fn(), verify: vi.fn() };
+    refreshTokensRepository = {
+      findTokenById: vi.fn(),
+      deleteTokenById: vi.fn(),
+      deleteAllTokensByUserId: vi.fn(),
+      saveToken: vi.fn(),
+    };
+    dataSource = {
+      transaction: vi.fn((cb: (m: object) => unknown) => cb(manager)),
+    };
+    res = { cookie: vi.fn(), clearCookie: vi.fn() };
+
+    const module = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        { provide: jwtConfig.KEY, useValue: jwt },
+        { provide: UsersService, useValue: usersService },
+        { provide: JwtService, useValue: jwtService },
+        { provide: RefreshTokensRepository, useValue: refreshTokensRepository },
+        { provide: DataSource, useValue: dataSource },
+      ],
+    }).compile();
+    service = module.get(AuthService);
+  });
+
+  const asResponse = () => res as unknown as Response;
+
   describe('signIn', () => {
     it('бросает 401, если пользователь не найден', async () => {
-      const usersService = {
-        findUserByLoginWithPassword: vi.fn().mockResolvedValue(null),
-      };
-      const service = new AuthService(
-        {} as any,
-        usersService as any,
-        {} as any,
-        {} as any,
-        {} as any,
-      );
-      const res = {} as any;
+      usersService.findUserByLoginWithPassword.mockResolvedValue(null);
       const dto = { login: 'user', password: '123456' };
-      await expect(service.signIn(res, dto)).rejects.toThrow(
+      await expect(service.signIn(asResponse(), dto)).rejects.toThrow(
         UnauthorizedException,
       );
     });
     it('бросает 401, если неверный пароль', async () => {
       const user = { id: 1, passwordHash: 'hash' };
-      const usersService = {
-        findUserByLoginWithPassword: vi.fn().mockResolvedValue(user),
-      };
-      const service = new AuthService(
-        {} as any,
-        usersService as any,
-        {} as any,
-        {} as any,
-        {} as any,
-      );
+      usersService.findUserByLoginWithPassword.mockResolvedValue(user);
       vi.mocked(verify).mockResolvedValue(false);
-      const res = {} as any;
       const dto = { login: 'login', password: '123456' };
-      await expect(service.signIn(res, dto)).rejects.toThrow(
+      await expect(service.signIn(asResponse(), dto)).rejects.toThrow(
         UnauthorizedException,
       );
     });
     it('возвращает access_token и ставит куку при верном пароле', async () => {
-      const jwt = {
-        accessSecret: 'a',
-        refreshSecret: 'r',
-        accessTtl: 900,
-        refreshTtl: 604800,
-      };
       const dto = { login: 'user', password: '123456' };
       const user = { id: 1, passwordHash: 'hash' };
-      const jwtService = { sign: vi.fn().mockReturnValue('token') };
-      const refreshTokensRepository = {
-        saveToken: vi.fn().mockResolvedValue(undefined),
-      };
-      const usersService = {
-        findUserByLoginWithPassword: vi.fn().mockResolvedValue(user),
-      };
+      jwtService.sign.mockReturnValue('token');
+      refreshTokensRepository.saveToken.mockResolvedValue(undefined);
+      usersService.findUserByLoginWithPassword.mockResolvedValue(user);
       vi.mocked(verify).mockResolvedValue(true);
-      const res = { cookie: vi.fn() } as any;
-      const service = new AuthService(
-        jwt as any,
-        usersService as any,
-        jwtService as any,
-        refreshTokensRepository as any,
-        {} as any,
-      );
-      const result = await service.signIn(res, dto);
+      const result = await service.signIn(asResponse(), dto);
       expect(res.cookie).toHaveBeenCalled();
       expect(result.access_token).toBe('token');
     });
   });
   describe('revokeAllSessions', () => {
     it('удаляет все refresh-токены пользователя', async () => {
-      const refreshTokensRepository = {
-        deleteAllTokensByUserId: vi.fn(),
-      };
-      const service = new AuthService(
-        {} as any,
-        {} as any,
-        {} as any,
-        refreshTokensRepository as any,
-        {} as any,
-      );
       await service.revokeAllSessions(999);
       expect(
         refreshTokensRepository.deleteAllTokensByUserId,
@@ -93,156 +111,62 @@ describe('AuthService', () => {
   });
   describe('logout', () => {
     it('отзывает текущую сессию', async () => {
-      const jwt = {
-        accessSecret: 'a',
-        refreshSecret: 'r',
-        accessTtl: 900,
-        refreshTtl: 604800,
-      };
-      const jwtService = {
-        verify: vi.fn().mockReturnValue({ jti: 'abc' }),
-      };
-      const refreshTokensRepository = {
-        deleteTokenById: vi.fn(),
-      };
-      const res = { clearCookie: vi.fn() } as any;
-      const service = new AuthService(
-        jwt as any,
-        {} as any,
-        jwtService as any,
-        refreshTokensRepository as any,
-        {} as any,
-      );
-      await service.logout(res, 'refresh-token');
+      jwtService.verify.mockReturnValue({ jti: 'abc' });
+      await service.logout(asResponse(), 'refresh-token');
       expect(res.clearCookie).toHaveBeenCalled();
       expect(refreshTokensRepository.deleteTokenById).toHaveBeenCalledWith(
         'abc',
       );
     });
     it('очищает куку и ничего не удаляет, если токена нет', async () => {
-      const refreshTokensRepository = { deleteTokenById: vi.fn() };
-      const service = new AuthService(
-        {} as any,
-        {} as any,
-        {} as any,
-        refreshTokensRepository as any,
-        {} as any,
-      );
-      const res = { clearCookie: vi.fn() } as any;
-      await service.logout(res, undefined);
+      await service.logout(asResponse(), undefined);
       expect(res.clearCookie).toHaveBeenCalled();
       expect(refreshTokensRepository.deleteTokenById).not.toHaveBeenCalled();
     });
     it('очищает куку и ничего не удаляет, если токен невалидный', async () => {
-      const refreshTokensRepository = { deleteTokenById: vi.fn() };
-      const jwtService = {
-        verify: vi.fn().mockImplementation(() => {
-          throw new Error('invalid');
-        }),
-      };
-      const service = new AuthService(
-        {} as any,
-        {} as any,
-        jwtService as any,
-        refreshTokensRepository as any,
-        {} as any,
-      );
-      const res = { clearCookie: vi.fn() } as any;
-      await service.logout(res, 'token');
+      jwtService.verify.mockImplementation(() => {
+        throw new Error('invalid');
+      });
+      await service.logout(asResponse(), 'token');
       expect(res.clearCookie).toHaveBeenCalled();
       expect(refreshTokensRepository.deleteTokenById).not.toHaveBeenCalled();
     });
   });
   describe('signUp', () => {
+    const dto = {
+      login: 'user1',
+      email: 'user@mail.com',
+      password: 'randPass',
+      age: 15,
+      description: 'blaBla',
+    };
+
     it('бросает 409, если пользователь с такой почтой уже существует', async () => {
-      const dto = {
-        login: 'user1',
-        email: 'user@mail.com',
-        password: 'randPass',
-        age: 15,
-        description: 'blaBla',
-      };
-      const usersService = {
-        findUserByEmail: vi.fn().mockResolvedValue({ id: 1 }),
-        createUser: vi.fn(),
-      };
-      const service = new AuthService(
-        {} as any,
-        usersService as any,
-        {} as any,
-        {} as any,
-        {} as any,
-      );
-      await expect(service.signUp({} as any, dto)).rejects.toThrow(
+      usersService.findUserByEmail.mockResolvedValue({ id: 1 });
+      await expect(service.signUp(asResponse(), dto)).rejects.toThrow(
         ConflictException,
       );
       expect(usersService.findUserByEmail).toHaveBeenCalledWith(dto.email);
       expect(usersService.createUser).not.toHaveBeenCalled();
     });
     it('бросает 409, если пользователь с таким логином уже существует', async () => {
-      const dto = {
-        login: 'user1',
-        email: 'user@mail.com',
-        password: 'randPass',
-        age: 15,
-        description: 'blaBla',
-      };
-      const usersService = {
-        findUserByEmail: vi.fn().mockResolvedValue(null),
-        findUserByLogin: vi.fn().mockResolvedValue({ id: 1 }),
-        createUser: vi.fn(),
-      };
-      const service = new AuthService(
-        {} as any,
-        usersService as any,
-        {} as any,
-        {} as any,
-        {} as any,
-      );
-      await expect(service.signUp({} as any, dto)).rejects.toThrow(
+      usersService.findUserByEmail.mockResolvedValue(null);
+      usersService.findUserByLogin.mockResolvedValue({ id: 1 });
+      await expect(service.signUp(asResponse(), dto)).rejects.toThrow(
         ConflictException,
       );
       expect(usersService.findUserByLogin).toHaveBeenCalledWith(dto.login);
       expect(usersService.createUser).not.toHaveBeenCalled();
     });
     it('успешная регистрация', async () => {
-      const manager = {};
-      const dataSource = {
-        transaction: vi.fn((cb) => cb(manager)),
-      };
-      const dto = {
-        login: 'user1',
-        email: 'user@mail.com',
-        password: 'randPass',
-        age: 15,
-        description: 'blaBla',
-      };
       const user = { id: 1 };
-      const usersService = {
-        findUserByEmail: vi.fn().mockResolvedValue(null),
-        findUserByLogin: vi.fn().mockResolvedValue(null),
-        createUser: vi.fn().mockResolvedValue(user),
-      };
-      const refreshTokensRepository = {
-        saveToken: vi.fn().mockResolvedValue(undefined),
-      };
-      const jwt = {
-        accessSecret: 'a',
-        refreshSecret: 'r',
-        accessTtl: 900,
-        refreshTtl: 604800,
-      };
+      usersService.findUserByEmail.mockResolvedValue(null);
+      usersService.findUserByLogin.mockResolvedValue(null);
+      usersService.createUser.mockResolvedValue(user);
+      refreshTokensRepository.saveToken.mockResolvedValue(undefined);
       vi.mocked(hash).mockResolvedValue('hash');
-      const jwtService = { sign: vi.fn().mockReturnValue('token') };
-      const res = { cookie: vi.fn() } as any;
-      const service = new AuthService(
-        jwt as any,
-        usersService as any,
-        jwtService as any,
-        refreshTokensRepository as any,
-        dataSource as any,
-      );
-      const result = await service.signUp(res, dto);
+      jwtService.sign.mockReturnValue('token');
+      const result = await service.signUp(asResponse(), dto);
       expect(usersService.createUser).toHaveBeenCalledWith(
         {
           login: dto.login,
@@ -263,106 +187,48 @@ describe('AuthService', () => {
   });
   describe('refresh', () => {
     it('бросает 401, если токена нет', async () => {
-      const service = new AuthService(
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-        {} as any,
-      );
-      await expect(service.refresh({} as any, undefined)).rejects.toThrow(
+      await expect(service.refresh(asResponse(), undefined)).rejects.toThrow(
         UnauthorizedException,
       );
     });
     it('бросает 401, если токен невалидный', async () => {
-      const jwtService = {
-        verify: vi.fn().mockImplementation(() => {
-          throw new Error('invalid');
-        }),
-      };
-      const service = new AuthService(
-        {} as any,
-        {} as any,
-        jwtService as any,
-        {} as any,
-        {} as any,
-      );
-      await expect(service.refresh({} as any, 'invalid-token')).rejects.toThrow(
-        UnauthorizedException,
-      );
+      jwtService.verify.mockImplementation(() => {
+        throw new Error('invalid');
+      });
+      await expect(
+        service.refresh(asResponse(), 'invalid-token'),
+      ).rejects.toThrow(UnauthorizedException);
       expect(jwtService.verify).toHaveBeenCalled();
     });
     it('бросает 401, если сессии нет в БД', async () => {
-      const refreshTokensRepository = {
-        findTokenById: vi.fn().mockResolvedValue(null),
-      };
-      const jwtService = {
-        verify: vi.fn().mockReturnValue({ jti: 'abc', id: 999 }),
-      };
-      const service = new AuthService(
-        {} as any,
-        {} as any,
-        jwtService as any,
-        refreshTokensRepository as any,
-        {} as any,
-      );
-      await expect(service.refresh({} as any, 'refresh-token')).rejects.toThrow(
-        UnauthorizedException,
-      );
+      refreshTokensRepository.findTokenById.mockResolvedValue(null);
+      jwtService.verify.mockReturnValue({ jti: 'abc', id: 999 });
+      await expect(
+        service.refresh(asResponse(), 'refresh-token'),
+      ).rejects.toThrow(UnauthorizedException);
       expect(refreshTokensRepository.findTokenById).toHaveBeenCalledWith('abc');
     });
     it('бросает 401, хэш токена не совпал', async () => {
-      const refreshTokensRepository = {
-        findTokenById: vi.fn().mockResolvedValue({ tokenHash: 'wrong-hash' }),
-        deleteTokenById: vi.fn(),
-      };
-      const jwtService = {
-        verify: vi.fn().mockReturnValue({ jti: 'abc', id: 999 }),
-      };
-      const service = new AuthService(
-        {} as any,
-        {} as any,
-        jwtService as any,
-        refreshTokensRepository as any,
-        {} as any,
-      );
-      await expect(service.refresh({} as any, 'hash-token')).rejects.toThrow(
+      refreshTokensRepository.findTokenById.mockResolvedValue({
+        tokenHash: 'wrong-hash',
+      });
+      jwtService.verify.mockReturnValue({ jti: 'abc', id: 999 });
+      await expect(service.refresh(asResponse(), 'hash-token')).rejects.toThrow(
         UnauthorizedException,
       );
       expect(refreshTokensRepository.findTokenById).toHaveBeenCalledWith('abc');
       expect(refreshTokensRepository.deleteTokenById).not.toHaveBeenCalled();
     });
     it('успех, обновляем токен', async () => {
-      const manager = {};
-      const dataSource = {
-        transaction: vi.fn((cb) => cb(manager)),
-      };
-      const jwt = {
-        accessSecret: 'a',
-        refreshSecret: 'r',
-        accessTtl: 900,
-        refreshTtl: 604800,
-      };
-      const jwtService = {
-        sign: vi.fn().mockReturnValue('token'),
-        verify: vi.fn().mockReturnValue({ jti: 'abc', id: 999 }),
-      };
       const token = 'refresh-token';
       const tokenHash = createHash('sha256').update(token).digest('hex');
-      const refreshTokensRepository = {
-        findTokenById: vi.fn().mockResolvedValue({ tokenHash }),
-        deleteTokenById: vi.fn().mockResolvedValue({ affected: 1 }),
-        saveToken: vi.fn(),
-      };
-      const res = { cookie: vi.fn() };
-      const service = new AuthService(
-        jwt as any,
-        {} as any,
-        jwtService as any,
-        refreshTokensRepository as any,
-        dataSource as any,
-      );
-      const result = await service.refresh(res as any, token);
+      jwtService.sign.mockReturnValue('token');
+      jwtService.verify.mockReturnValue({ jti: 'abc', id: 999 });
+      refreshTokensRepository.findTokenById.mockResolvedValue({ tokenHash });
+      refreshTokensRepository.deleteTokenById.mockResolvedValue({
+        affected: 1,
+      });
+      const result = await service.refresh(asResponse(), token);
       expect(refreshTokensRepository.deleteTokenById).toHaveBeenCalledWith(
         'abc',
         manager,
@@ -375,36 +241,15 @@ describe('AuthService', () => {
       expect(result.access_token).toBe('token');
     });
     it('бросает 401, если токен уже использован', async () => {
-      const manager = {};
-      const dataSource = {
-        transaction: vi.fn((cb) => cb(manager)),
-      };
-      const jwt = {
-        accessSecret: 'a',
-        refreshSecret: 'r',
-        accessTtl: 900,
-        refreshTtl: 604800,
-      };
-      const jwtService = {
-        sign: vi.fn().mockReturnValue('token'),
-        verify: vi.fn().mockReturnValue({ jti: 'abc', id: 999 }),
-      };
       const token = 'refresh-token';
       const tokenHash = createHash('sha256').update(token).digest('hex');
-      const refreshTokensRepository = {
-        findTokenById: vi.fn().mockResolvedValue({ tokenHash }),
-        deleteTokenById: vi.fn().mockResolvedValue({ affected: 0 }),
-        saveToken: vi.fn(),
-      };
-      const res = { cookie: vi.fn() };
-      const service = new AuthService(
-        jwt as any,
-        {} as any,
-        jwtService as any,
-        refreshTokensRepository as any,
-        dataSource as any,
-      );
-      await expect(service.refresh(res as any, token)).rejects.toThrow(
+      jwtService.sign.mockReturnValue('token');
+      jwtService.verify.mockReturnValue({ jti: 'abc', id: 999 });
+      refreshTokensRepository.findTokenById.mockResolvedValue({ tokenHash });
+      refreshTokensRepository.deleteTokenById.mockResolvedValue({
+        affected: 0,
+      });
+      await expect(service.refresh(asResponse(), token)).rejects.toThrow(
         UnauthorizedException,
       );
       expect(refreshTokensRepository.saveToken).not.toHaveBeenCalled();

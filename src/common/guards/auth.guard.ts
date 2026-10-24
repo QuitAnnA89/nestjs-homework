@@ -31,7 +31,7 @@ export class AccessTokenGuard implements CanActivate {
         secret: this.jwt.accessSecret,
       });
       req.user = user;
-    } catch (e) {
+    } catch {
       throw new UnauthorizedException('Пользователь не авторизован');
     }
     return true;

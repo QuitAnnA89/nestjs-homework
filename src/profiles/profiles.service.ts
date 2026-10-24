@@ -3,7 +3,6 @@ import { DataSource } from 'typeorm';
 import { AuthService } from '../auth/auth.service.js';
 import { UsersService } from '../users/users.service.js';
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
-
 @Injectable()
 export class ProfilesService {
   constructor(

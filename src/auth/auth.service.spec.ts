@@ -374,5 +374,41 @@ describe('AuthService', () => {
       expect(res.cookie).toHaveBeenCalled();
       expect(result.access_token).toBe('token');
     });
+    it('бросает 401, если токен уже использован', async () => {
+      const manager = {};
+      const dataSource = {
+        transaction: vi.fn((cb) => cb(manager)),
+      };
+      const jwt = {
+        accessSecret: 'a',
+        refreshSecret: 'r',
+        accessTtl: 900,
+        refreshTtl: 604800,
+      };
+      const jwtService = {
+        sign: vi.fn().mockReturnValue('token'),
+        verify: vi.fn().mockReturnValue({ jti: 'abc', id: 999 }),
+      };
+      const token = 'refresh-token';
+      const tokenHash = createHash('sha256').update(token).digest('hex');
+      const refreshTokensRepository = {
+        findTokenById: vi.fn().mockResolvedValue({ tokenHash }),
+        deleteTokenById: vi.fn().mockResolvedValue({ affected: 0 }),
+        saveToken: vi.fn(),
+      };
+      const res = { cookie: vi.fn() };
+      const service = new AuthService(
+        jwt as any,
+        {} as any,
+        jwtService as any,
+        refreshTokensRepository as any,
+        dataSource as any,
+      );
+      await expect(service.refresh(res as any, token)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(refreshTokensRepository.saveToken).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
   });
 });

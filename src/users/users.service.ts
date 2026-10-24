@@ -31,9 +31,7 @@ export class UsersService {
     }
     return user;
   }
-  async getAllUsers(page?: number, limit?: number, login?: string) {
-    page = page || 1;
-    limit = limit || 10;
+  async getAllUsers(page: number, limit: number, login?: string) {
     const offset = page * limit - limit;
     const [result, total] = await this.usersRepository.findAllUsers(
       limit,

@@ -16,6 +16,7 @@ import { JwtPayload } from '../common/interfaces/jwt-payload.interface.js';
 import { RefreshPayload } from '../common/interfaces/refresh-payload.interface.js';
 import { jwtConfig } from '../configs/jwt.config.js';
 import { UsersService } from '../users/users.service.js';
+import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from './auth.constants.js';
 import { SignInDto } from './dto/sign-in.dto.js';
 import { SignUpDto } from './dto/sign-up.dto.js';
 import { RefreshTokensRepository } from './refresh-tokens.repository.js';
@@ -178,7 +179,7 @@ export class AuthService {
   }
 
   async logout(res: Response, refresh_token: string | undefined) {
-    res.clearCookie('refreshToken', { path: '/auth' });
+    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_PATH });
     if (!refresh_token) {
       this.logger.warn(`ошибка выхода: у пользователя нет refresh-токена`);
       return;
@@ -222,12 +223,12 @@ export class AuthService {
     return { access_token, refresh_token, expiresAt };
   }
   private setCookie(res: Response, value: string, expires: Date) {
-    res.cookie('refreshToken', value, {
+    res.cookie(REFRESH_COOKIE_NAME, value, {
       httpOnly: true,
       expires,
       secure: false,
       sameSite: 'lax',
-      path: '/auth',
+      path: REFRESH_COOKIE_PATH,
     });
   }
 }

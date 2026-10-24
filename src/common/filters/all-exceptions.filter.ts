@@ -9,6 +9,7 @@ import {
 import { type Request, type Response } from 'express';
 import { QueryFailedError } from 'typeorm';
 import { ErrorResponse } from '../interfaces/error-response.interface.js';
+import { PG_UNIQUE_VIOLATION } from './postgres-errors.js';
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
@@ -29,7 +30,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
     if (exception instanceof QueryFailedError) {
       const code = (exception.driverError as { code: string }).code;
-      if (code === '23505') {
+      if (code === PG_UNIQUE_VIOLATION) {
         const status = HttpStatus.CONFLICT;
         const message = 'Запись с такими данными уже существует';
         return response

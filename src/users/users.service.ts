@@ -3,6 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { EntityManager } from 'typeorm';
 import { CreateUserDto } from './dto/create-users.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
 import { UsersRepository } from './users.repository.js';
@@ -17,8 +18,8 @@ export class UsersService {
   async findUserByEmail(email: string) {
     return await this.usersRepository.findUserByEmail(email);
   }
-  async createUser(dto: CreateUserDto) {
-    return await this.usersRepository.createUser(dto);
+  async createUser(dto: CreateUserDto, manager?: EntityManager) {
+    return await this.usersRepository.createUser(dto, manager);
   }
   async findUserByLoginWithPassword(login: string) {
     return await this.usersRepository.findUserByLoginWithPassword(login);
@@ -43,9 +44,8 @@ export class UsersService {
     return { data: result, page, limit, total, totalPages };
   }
 
-  async deleteUserProfile(id: number) {
-    const result = await this.usersRepository.softDeleteUser(id);
-
+  async deleteUserProfile(id: number, manager?: EntityManager) {
+    const result = await this.usersRepository.softDeleteUser(id, manager);
     if (result.affected === 0) {
       throw new UnauthorizedException('Пользователь не авторизован');
     }

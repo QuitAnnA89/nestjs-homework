@@ -39,7 +39,10 @@ describe('UsersService', () => {
       const result = await service.deleteUserProfile(999);
 
       expect(result).toEqual({ affected: 1 });
-      expect(usersRepository.softDeleteUser).toHaveBeenCalledWith(999);
+      expect(usersRepository.softDeleteUser).toHaveBeenCalledWith(
+        999,
+        undefined,
+      );
     });
     it('бросает 401, если пользователь не найден', async () => {
       const usersRepository = {

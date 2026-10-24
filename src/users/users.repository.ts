@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, IsNull, Repository, UpdateResult } from 'typeorm';
+import {
+  EntityManager,
+  ILike,
+  IsNull,
+  Repository,
+  UpdateResult,
+} from 'typeorm';
 import { CreateUserDto } from './dto/create-users.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
 import { UserEntity } from './entities/user.entity.js';
@@ -27,9 +33,13 @@ export class UsersRepository {
     });
   }
 
-  async createUser(dto: CreateUserDto): Promise<UserEntity> {
-    const user = this.repo.create(dto);
-    return this.repo.save(user);
+  async createUser(
+    dto: CreateUserDto,
+    manager?: EntityManager,
+  ): Promise<UserEntity> {
+    const repository = manager ? manager.getRepository(UserEntity) : this.repo;
+    const user = repository.create(dto);
+    return repository.save(user);
   }
 
   async findUserById(id: number): Promise<UserEntity | null> {
@@ -64,8 +74,12 @@ export class UsersRepository {
       },
     });
   }
-  async softDeleteUser(id: number): Promise<UpdateResult> {
-    return this.repo.softDelete({ id, deletedAt: IsNull() });
+  async softDeleteUser(
+    id: number,
+    manager?: EntityManager,
+  ): Promise<UpdateResult> {
+    const repository = manager ? manager.getRepository(UserEntity) : this.repo;
+    return repository.softDelete({ id, deletedAt: IsNull() });
   }
 
   async updateUser(id: number, dto: UpdateUserDto): Promise<UpdateResult> {

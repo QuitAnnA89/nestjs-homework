@@ -11,6 +11,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { hash, verify } from 'argon2';
 import type { Response } from 'express';
 import { createHash } from 'node:crypto';
+import { DataSource, EntityManager } from 'typeorm';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface.js';
 import { RefreshPayload } from '../common/interfaces/refresh-payload.interface.js';
 import { jwtConfig } from '../configs/jwt.config.js';
@@ -26,6 +27,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly refreshTokensRepository: RefreshTokensRepository,
+    private readonly dataSource: DataSource,
   ) {}
   private readonly logger = new Logger(AuthService.name);
 
@@ -55,17 +57,27 @@ export class AuthService {
       );
     }
     const passwordHash = await hash(password);
-    const user = await this.usersService.createUser({
-      login,
-      email,
-      passwordHash,
-      age,
-      description,
-    });
+    const { user, tokens } = await this.dataSource.transaction(
+      async (manager) => {
+        const user = await this.usersService.createUser(
+          {
+            login,
+            email,
+            passwordHash,
+            age,
+            description,
+          },
+          manager,
+        );
+        const tokens = await this.issueTokens(user.id, manager);
+        return { user, tokens };
+      },
+    );
     this.logger.log(
       `успех: пользователь зарегистрировался под userId=${user.id}`,
     );
-    return this.issueTokensWithCookie(res, user.id);
+    this.setCookie(res, tokens.refresh_token, tokens.expiresAt);
+    return { access_token: tokens.access_token };
   }
 
   async signIn(res: Response, dto: SignInDto) {
@@ -87,10 +99,12 @@ export class AuthService {
       );
       throw new UnauthorizedException('Неверный логин или пароль');
     }
+    const tokens = await this.issueTokens(user.id);
+    this.setCookie(res, tokens.refresh_token, tokens.expiresAt);
     this.logger.log(
       `успех: пользователь вошёл userId=${user.id}, login=${login}`,
     );
-    return this.issueTokensWithCookie(res, user.id);
+    return { access_token: tokens.access_token };
   }
 
   async refresh(res: Response, refresh_token: string | undefined) {
@@ -125,20 +139,26 @@ export class AuthService {
       );
       throw new UnauthorizedException('Недействительный токен');
     }
-    await this.refreshTokensRepository.deleteTokenById(jti);
+    const tokens = await this.dataSource.transaction(async (manager) => {
+      const result = await this.refreshTokensRepository.deleteTokenById(
+        jti,
+        manager,
+      );
+      if (result.affected === 0) {
+        this.logger.warn(
+          `ошибка обновления токена: повторное использование токена userId=${id}, jti=${jti}`,
+        );
+        throw new UnauthorizedException('Недействительный токен');
+      }
+      const tokens = await this.issueTokens(id, manager);
+      return tokens;
+    });
     this.logger.log(
       `успех: токен обновлен у пользователя userId=${id}, jti=${jti}`,
     );
-    return this.issueTokensWithCookie(res, id);
+    this.setCookie(res, tokens.refresh_token, tokens.expiresAt);
+    return { access_token: tokens.access_token };
   }
-
-  private async issueTokensWithCookie(res: Response, userId: number) {
-    const { access_token, refresh_token, expiresAt } =
-      await this.issueTokens(userId);
-    this.setCookie(res, refresh_token, expiresAt);
-    return { access_token };
-  }
-
   private generateTokens(id: number) {
     const accessPayload: JwtPayload = { id };
 
@@ -179,22 +199,25 @@ export class AuthService {
     );
   }
 
-  async revokeAllSessions(userId: number) {
-    await this.refreshTokensRepository.deleteAllTokensByUserId(userId);
+  async revokeAllSessions(userId: number, manager?: EntityManager) {
+    await this.refreshTokensRepository.deleteAllTokensByUserId(userId, manager);
     this.logger.log(`успех: сессии пользователя удалены userId=${userId}`);
   }
 
-  private async issueTokens(userId: number) {
+  private async issueTokens(userId: number, manager?: EntityManager) {
     const { access_token, refresh_token, jti } = this.generateTokens(userId);
     const expiresAt = new Date(this.jwt.refreshTtl * 1000 + Date.now());
     const tokenHash = createHash('sha256').update(refresh_token).digest('hex');
 
-    await this.refreshTokensRepository.saveToken({
-      id: jti,
-      userId: userId,
-      tokenHash,
-      expiresAt,
-    });
+    await this.refreshTokensRepository.saveToken(
+      {
+        id: jti,
+        userId: userId,
+        tokenHash,
+        expiresAt,
+      },
+      manager,
+    );
 
     return { access_token, refresh_token, expiresAt };
   }

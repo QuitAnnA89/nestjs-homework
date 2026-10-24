@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import { AuthService } from '../auth/auth.service.js';
 import { UsersService } from '../users/users.service.js';
 import { UpdateProfileDto } from './dto/update-profile.dto.js';
@@ -8,6 +9,7 @@ export class ProfilesService {
   constructor(
     private readonly usersService: UsersService,
     private readonly authService: AuthService,
+    private readonly dataSource: DataSource,
   ) {}
 
   getProfile(userId: number) {
@@ -19,7 +21,9 @@ export class ProfilesService {
   }
 
   async deleteProfile(userId: number) {
-    await this.usersService.deleteUserProfile(userId);
-    await this.authService.revokeAllSessions(userId);
+    await this.dataSource.transaction(async (manager) => {
+      await this.usersService.deleteUserProfile(userId, manager);
+      await this.authService.revokeAllSessions(userId, manager);
+    });
   }
 }

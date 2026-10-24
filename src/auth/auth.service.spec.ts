@@ -16,6 +16,7 @@ describe('AuthService', () => {
         usersService as any,
         {} as any,
         {} as any,
+        {} as any,
       );
       const res = {} as any;
       const dto = { login: 'user', password: '123456' };
@@ -31,6 +32,7 @@ describe('AuthService', () => {
       const service = new AuthService(
         {} as any,
         usersService as any,
+        {} as any,
         {} as any,
         {} as any,
       );
@@ -64,6 +66,7 @@ describe('AuthService', () => {
         usersService as any,
         jwtService as any,
         refreshTokensRepository as any,
+        {} as any,
       );
       const result = await service.signIn(res, dto);
       expect(res.cookie).toHaveBeenCalled();
@@ -80,11 +83,12 @@ describe('AuthService', () => {
         {} as any,
         {} as any,
         refreshTokensRepository as any,
+        {} as any,
       );
       await service.revokeAllSessions(999);
       expect(
         refreshTokensRepository.deleteAllTokensByUserId,
-      ).toHaveBeenCalledWith(999);
+      ).toHaveBeenCalledWith(999, undefined);
     });
   });
   describe('logout', () => {
@@ -107,6 +111,7 @@ describe('AuthService', () => {
         {} as any,
         jwtService as any,
         refreshTokensRepository as any,
+        {} as any,
       );
       await service.logout(res, 'refresh-token');
       expect(res.clearCookie).toHaveBeenCalled();
@@ -121,6 +126,7 @@ describe('AuthService', () => {
         {} as any,
         {} as any,
         refreshTokensRepository as any,
+        {} as any,
       );
       const res = { clearCookie: vi.fn() } as any;
       await service.logout(res, undefined);
@@ -139,6 +145,7 @@ describe('AuthService', () => {
         {} as any,
         jwtService as any,
         refreshTokensRepository as any,
+        {} as any,
       );
       const res = { clearCookie: vi.fn() } as any;
       await service.logout(res, 'token');
@@ -162,6 +169,7 @@ describe('AuthService', () => {
       const service = new AuthService(
         {} as any,
         usersService as any,
+        {} as any,
         {} as any,
         {} as any,
       );
@@ -189,6 +197,7 @@ describe('AuthService', () => {
         usersService as any,
         {} as any,
         {} as any,
+        {} as any,
       );
       await expect(service.signUp({} as any, dto)).rejects.toThrow(
         ConflictException,
@@ -197,6 +206,10 @@ describe('AuthService', () => {
       expect(usersService.createUser).not.toHaveBeenCalled();
     });
     it('успешная регистрация', async () => {
+      const manager = {};
+      const dataSource = {
+        transaction: vi.fn((cb) => cb(manager)),
+      };
       const dto = {
         login: 'user1',
         email: 'user@mail.com',
@@ -227,15 +240,23 @@ describe('AuthService', () => {
         usersService as any,
         jwtService as any,
         refreshTokensRepository as any,
+        dataSource as any,
       );
       const result = await service.signUp(res, dto);
-      expect(usersService.createUser).toHaveBeenCalledWith({
-        login: dto.login,
-        email: dto.email,
-        passwordHash: 'hash',
-        age: dto.age,
-        description: dto.description,
-      });
+      expect(usersService.createUser).toHaveBeenCalledWith(
+        {
+          login: dto.login,
+          email: dto.email,
+          passwordHash: 'hash',
+          age: dto.age,
+          description: dto.description,
+        },
+        manager,
+      );
+      expect(refreshTokensRepository.saveToken).toHaveBeenCalledWith(
+        expect.anything(),
+        manager,
+      );
       expect(res.cookie).toHaveBeenCalled();
       expect(result.access_token).toBe('token');
     });
@@ -243,6 +264,7 @@ describe('AuthService', () => {
   describe('refresh', () => {
     it('бросает 401, если токена нет', async () => {
       const service = new AuthService(
+        {} as any,
         {} as any,
         {} as any,
         {} as any,
@@ -263,6 +285,7 @@ describe('AuthService', () => {
         {} as any,
         jwtService as any,
         {} as any,
+        {} as any,
       );
       await expect(service.refresh({} as any, 'invalid-token')).rejects.toThrow(
         UnauthorizedException,
@@ -281,6 +304,7 @@ describe('AuthService', () => {
         {} as any,
         jwtService as any,
         refreshTokensRepository as any,
+        {} as any,
       );
       await expect(service.refresh({} as any, 'refresh-token')).rejects.toThrow(
         UnauthorizedException,
@@ -300,6 +324,7 @@ describe('AuthService', () => {
         {} as any,
         jwtService as any,
         refreshTokensRepository as any,
+        {} as any,
       );
       await expect(service.refresh({} as any, 'hash-token')).rejects.toThrow(
         UnauthorizedException,
@@ -308,6 +333,10 @@ describe('AuthService', () => {
       expect(refreshTokensRepository.deleteTokenById).not.toHaveBeenCalled();
     });
     it('успех, обновляем токен', async () => {
+      const manager = {};
+      const dataSource = {
+        transaction: vi.fn((cb) => cb(manager)),
+      };
       const jwt = {
         accessSecret: 'a',
         refreshSecret: 'r',
@@ -322,7 +351,7 @@ describe('AuthService', () => {
       const tokenHash = createHash('sha256').update(token).digest('hex');
       const refreshTokensRepository = {
         findTokenById: vi.fn().mockResolvedValue({ tokenHash }),
-        deleteTokenById: vi.fn(),
+        deleteTokenById: vi.fn().mockResolvedValue({ affected: 1 }),
         saveToken: vi.fn(),
       };
       const res = { cookie: vi.fn() };
@@ -331,10 +360,16 @@ describe('AuthService', () => {
         {} as any,
         jwtService as any,
         refreshTokensRepository as any,
+        dataSource as any,
       );
       const result = await service.refresh(res as any, token);
       expect(refreshTokensRepository.deleteTokenById).toHaveBeenCalledWith(
         'abc',
+        manager,
+      );
+      expect(refreshTokensRepository.saveToken).toHaveBeenCalledWith(
+        expect.anything(),
+        manager,
       );
       expect(res.cookie).toHaveBeenCalled();
       expect(result.access_token).toBe('token');

@@ -6,6 +6,7 @@ import type { Response } from 'express';
 import { createHash } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { appConfig } from '../configs/app.config.js';
 import { jwtConfig } from '../configs/jwt.config.js';
 import { UsersService } from '../users/users.service.js';
 import { AuthService } from './auth.service.js';
@@ -61,6 +62,7 @@ describe('AuthService', () => {
       providers: [
         AuthService,
         { provide: jwtConfig.KEY, useValue: jwt },
+        { provide: appConfig.KEY, useValue: { cookieSecure: false } },
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: jwtService },
         { provide: RefreshTokensRepository, useValue: refreshTokensRepository },

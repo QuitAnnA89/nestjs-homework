@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface.js';
 import { RefreshPayload } from '../common/interfaces/refresh-payload.interface.js';
+import { appConfig } from '../configs/app.config.js';
 import { jwtConfig } from '../configs/jwt.config.js';
 import { UsersService } from '../users/users.service.js';
 import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH } from './auth.constants.js';
@@ -25,6 +26,8 @@ export class AuthService {
   constructor(
     @Inject(jwtConfig.KEY)
     private readonly jwt: ConfigType<typeof jwtConfig>,
+    @Inject(appConfig.KEY)
+    private readonly app: ConfigType<typeof appConfig>,
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly refreshTokensRepository: RefreshTokensRepository,
@@ -226,7 +229,7 @@ export class AuthService {
     res.cookie(REFRESH_COOKIE_NAME, value, {
       httpOnly: true,
       expires,
-      secure: false,
+      secure: this.app.cookieSecure,
       sameSite: 'lax',
       path: REFRESH_COOKIE_PATH,
     });

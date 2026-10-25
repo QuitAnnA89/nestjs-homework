@@ -1,4 +1,4 @@
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { UsersRepository } from './users.repository.js';
@@ -41,10 +41,10 @@ describe('UsersService', () => {
       expect(result).toEqual(user);
     });
 
-    it('бросает 401, если пользователь не найден', async () => {
+    it('бросает 404, если пользователь не найден', async () => {
       usersRepository.findUserById.mockResolvedValue(null);
       await expect(service.findUserById(999)).rejects.toThrow(
-        UnauthorizedException,
+        NotFoundException,
       );
     });
   });
@@ -59,11 +59,11 @@ describe('UsersService', () => {
         undefined,
       );
     });
-    it('бросает 401, если пользователь не найден', async () => {
+    it('бросает 404, если пользователь не найден', async () => {
       usersRepository.softDeleteUser.mockResolvedValue({ affected: 0 });
 
       await expect(service.deleteUserProfile(999)).rejects.toThrow(
-        UnauthorizedException,
+        NotFoundException,
       );
     });
   });
@@ -95,7 +95,7 @@ describe('UsersService', () => {
       );
       expect(usersRepository.updateUser).not.toHaveBeenCalled();
     });
-    it('бросает 401 ошибку, если пользователь не авторизирован', async () => {
+    it('бросает 404 ошибку, если пользователь не найден', async () => {
       const dto = {
         login: 'user',
         email: 'user@mail.com',
@@ -104,7 +104,7 @@ describe('UsersService', () => {
       };
       usersRepository.updateUser.mockResolvedValue({ affected: 0 });
       await expect(service.updateUserProfile(999, dto)).rejects.toThrow(
-        UnauthorizedException,
+        NotFoundException,
       );
     });
   });

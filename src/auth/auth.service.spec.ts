@@ -2,11 +2,9 @@ import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { hash, verify } from 'argon2';
-import type { Response } from 'express';
 import { createHash } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
-import { appConfig } from '../configs/app.config.js';
 import { jwtConfig } from '../configs/jwt.config.js';
 import { UsersService } from '../users/users.service.js';
 import { AuthService } from './auth.service.js';
@@ -37,7 +35,6 @@ describe('AuthService', () => {
     saveToken: Mock;
   };
   let dataSource: { transaction: Mock };
-  let res: { cookie: Mock; clearCookie: Mock };
 
   beforeEach(async () => {
     usersService = {
@@ -56,13 +53,11 @@ describe('AuthService', () => {
     dataSource = {
       transaction: vi.fn((cb: (m: object) => unknown) => cb(manager)),
     };
-    res = { cookie: vi.fn(), clearCookie: vi.fn() };
 
     const module = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: jwtConfig.KEY, useValue: jwt },
-        { provide: appConfig.KEY, useValue: { cookieSecure: false } },
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: jwtService },
         { provide: RefreshTokensRepository, useValue: refreshTokensRepository },
@@ -72,34 +67,28 @@ describe('AuthService', () => {
     service = module.get(AuthService);
   });
 
-  const asResponse = () => res as unknown as Response;
-
   describe('signIn', () => {
     it('бросает 401, если пользователь не найден', async () => {
       usersService.findUserByLoginWithPassword.mockResolvedValue(null);
       const dto = { login: 'user', password: '123456' };
-      await expect(service.signIn(asResponse(), dto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.signIn(dto)).rejects.toThrow(UnauthorizedException);
     });
     it('бросает 401, если неверный пароль', async () => {
       const user = { id: 1, passwordHash: 'hash' };
       usersService.findUserByLoginWithPassword.mockResolvedValue(user);
       vi.mocked(verify).mockResolvedValue(false);
       const dto = { login: 'login', password: '123456' };
-      await expect(service.signIn(asResponse(), dto)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(service.signIn(dto)).rejects.toThrow(UnauthorizedException);
     });
-    it('возвращает access_token и ставит куку при верном пароле', async () => {
+    it('возвращает токены при верном пароле', async () => {
       const dto = { login: 'user', password: '123456' };
       const user = { id: 1, passwordHash: 'hash' };
       jwtService.sign.mockReturnValue('token');
       refreshTokensRepository.saveToken.mockResolvedValue(undefined);
       usersService.findUserByLoginWithPassword.mockResolvedValue(user);
       vi.mocked(verify).mockResolvedValue(true);
-      const result = await service.signIn(asResponse(), dto);
-      expect(res.cookie).toHaveBeenCalled();
+      const result = await service.signIn(dto);
+      expect(result.refresh_token).toBe('token');
       expect(result.access_token).toBe('token');
     });
   });
@@ -114,23 +103,20 @@ describe('AuthService', () => {
   describe('logout', () => {
     it('отзывает текущую сессию', async () => {
       jwtService.verify.mockReturnValue({ jti: 'abc' });
-      await service.logout(asResponse(), 'refresh-token');
-      expect(res.clearCookie).toHaveBeenCalled();
+      await service.logout('refresh-token');
       expect(refreshTokensRepository.deleteTokenById).toHaveBeenCalledWith(
         'abc',
       );
     });
-    it('очищает куку и ничего не удаляет, если токена нет', async () => {
-      await service.logout(asResponse(), undefined);
-      expect(res.clearCookie).toHaveBeenCalled();
+    it('ничего не удаляет, если токена нет', async () => {
+      await service.logout(undefined);
       expect(refreshTokensRepository.deleteTokenById).not.toHaveBeenCalled();
     });
-    it('очищает куку и ничего не удаляет, если токен невалидный', async () => {
+    it('ничего не удаляет, если токен невалидный', async () => {
       jwtService.verify.mockImplementation(() => {
         throw new Error('invalid');
       });
-      await service.logout(asResponse(), 'token');
-      expect(res.clearCookie).toHaveBeenCalled();
+      await service.logout('token');
       expect(refreshTokensRepository.deleteTokenById).not.toHaveBeenCalled();
     });
   });
@@ -145,18 +131,14 @@ describe('AuthService', () => {
 
     it('бросает 409, если пользователь с такой почтой уже существует', async () => {
       usersService.findUserByEmail.mockResolvedValue({ id: 1 });
-      await expect(service.signUp(asResponse(), dto)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(service.signUp(dto)).rejects.toThrow(ConflictException);
       expect(usersService.findUserByEmail).toHaveBeenCalledWith(dto.email);
       expect(usersService.createUser).not.toHaveBeenCalled();
     });
     it('бросает 409, если пользователь с таким логином уже существует', async () => {
       usersService.findUserByEmail.mockResolvedValue(null);
       usersService.findUserByLogin.mockResolvedValue({ id: 1 });
-      await expect(service.signUp(asResponse(), dto)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(service.signUp(dto)).rejects.toThrow(ConflictException);
       expect(usersService.findUserByLogin).toHaveBeenCalledWith(dto.login);
       expect(usersService.createUser).not.toHaveBeenCalled();
     });
@@ -168,7 +150,7 @@ describe('AuthService', () => {
       refreshTokensRepository.saveToken.mockResolvedValue(undefined);
       vi.mocked(hash).mockResolvedValue('hash');
       jwtService.sign.mockReturnValue('token');
-      const result = await service.signUp(asResponse(), dto);
+      const result = await service.signUp(dto);
       expect(usersService.createUser).toHaveBeenCalledWith(
         {
           login: dto.login,
@@ -183,13 +165,13 @@ describe('AuthService', () => {
         expect.anything(),
         manager,
       );
-      expect(res.cookie).toHaveBeenCalled();
+      expect(result.refresh_token).toBe('token');
       expect(result.access_token).toBe('token');
     });
   });
   describe('refresh', () => {
     it('бросает 401, если токена нет', async () => {
-      await expect(service.refresh(asResponse(), undefined)).rejects.toThrow(
+      await expect(service.refresh(undefined)).rejects.toThrow(
         UnauthorizedException,
       );
     });
@@ -197,17 +179,17 @@ describe('AuthService', () => {
       jwtService.verify.mockImplementation(() => {
         throw new Error('invalid');
       });
-      await expect(
-        service.refresh(asResponse(), 'invalid-token'),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refresh('invalid-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
       expect(jwtService.verify).toHaveBeenCalled();
     });
     it('бросает 401, если сессии нет в БД', async () => {
       refreshTokensRepository.findTokenById.mockResolvedValue(null);
       jwtService.verify.mockReturnValue({ jti: 'abc', id: 999 });
-      await expect(
-        service.refresh(asResponse(), 'refresh-token'),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refresh('refresh-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
       expect(refreshTokensRepository.findTokenById).toHaveBeenCalledWith('abc');
     });
     it('бросает 401, хэш токена не совпал', async () => {
@@ -215,7 +197,7 @@ describe('AuthService', () => {
         tokenHash: 'wrong-hash',
       });
       jwtService.verify.mockReturnValue({ jti: 'abc', id: 999 });
-      await expect(service.refresh(asResponse(), 'hash-token')).rejects.toThrow(
+      await expect(service.refresh('hash-token')).rejects.toThrow(
         UnauthorizedException,
       );
       expect(refreshTokensRepository.findTokenById).toHaveBeenCalledWith('abc');
@@ -230,7 +212,7 @@ describe('AuthService', () => {
       refreshTokensRepository.deleteTokenById.mockResolvedValue({
         affected: 1,
       });
-      const result = await service.refresh(asResponse(), token);
+      const result = await service.refresh(token);
       expect(refreshTokensRepository.deleteTokenById).toHaveBeenCalledWith(
         'abc',
         manager,
@@ -239,7 +221,7 @@ describe('AuthService', () => {
         expect.anything(),
         manager,
       );
-      expect(res.cookie).toHaveBeenCalled();
+      expect(result.refresh_token).toBe('token');
       expect(result.access_token).toBe('token');
     });
     it('бросает 401, если токен уже использован', async () => {
@@ -251,11 +233,10 @@ describe('AuthService', () => {
       refreshTokensRepository.deleteTokenById.mockResolvedValue({
         affected: 0,
       });
-      await expect(service.refresh(asResponse(), token)).rejects.toThrow(
+      await expect(service.refresh(token)).rejects.toThrow(
         UnauthorizedException,
       );
       expect(refreshTokensRepository.saveToken).not.toHaveBeenCalled();
-      expect(res.cookie).not.toHaveBeenCalled();
     });
   });
 });
